@@ -1,0 +1,6 @@
+# scraper working files / output
+done_surnames.txt
+test_done.txt
+test.csv
+*.pyc
+__pycache__/
