@@ -24,12 +24,27 @@ import argparse
 import csv
 import html as htmlmod
 import http.cookiejar
+import logging
 import os
 import re
-import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+
+log = logging.getLogger("census")
+
+
+def setup_logging(logfile):
+    log.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s",
+                            datefmt="%Y-%m-%d %H:%M:%S")
+    fh = logging.FileHandler(logfile, encoding="utf-8")
+    fh.setFormatter(fmt)
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    log.handlers = [fh, ch]
 
 URL = "https://www.nationalarchives.gi/1921.aspx"
 
@@ -69,17 +84,26 @@ class Session:
         ]
         self.state = {}
 
-    def _fetch(self, data=None, retries=4):
+    def _fetch(self, data=None, retries=5, tag=""):
         body = urllib.parse.urlencode(data).encode() if data else None
         last = None
-        for attempt in range(retries):
+        for attempt in range(1, retries + 1):
             try:
                 req = urllib.request.Request(URL, data=body)
                 with self.opener.open(req, timeout=60) as r:
-                    return r.read().decode("utf-8", "replace")
-            except Exception as e:  # noqa: BLE001 - network flakiness, retry
+                    status = getattr(r, "status", 200)
+                    text = r.read().decode("utf-8", "replace")
+                    if status != 200:
+                        last = f"HTTP {status}"
+                        raise RuntimeError(last)
+                    return text
+            except Exception as e:  # noqa: BLE001 - network/server flakiness, retry
                 last = e
-                time.sleep(2 * (attempt + 1))
+                wait = 2 * attempt
+                log.warning("request%s failed (attempt %d/%d): %s - retrying in %ds",
+                            f" [{tag}]" if tag else "", attempt, retries, e, wait)
+                if attempt < retries:
+                    time.sleep(wait)
         raise RuntimeError(f"request failed after {retries} tries: {last}")
 
     def _capture_state(self, html):
@@ -98,12 +122,12 @@ class Session:
         self._capture_state(html)
         return html
 
-    def postback(self, target, argument, surname):
+    def postback(self, target, argument, surname, tag=""):
         data = dict(self.state)
         data["__EVENTTARGET"] = target
         data["__EVENTARGUMENT"] = argument
         data[DROPDOWN] = surname
-        html = self._fetch(data)
+        html = self._fetch(data, tag=tag)
         self._capture_state(html)
         return html
 
@@ -136,7 +160,7 @@ def parse_details(html):
 
 def scrape_surname(sess, surname):
     """Yield one dict per individual for the given surname."""
-    html = sess.postback(DROPDOWN, "", surname)
+    html = sess.postback(DROPDOWN, "", surname, tag=f"{surname} select")
     total = total_records(html)
     if total == 0:
         return
@@ -144,7 +168,8 @@ def scrape_surname(sess, surname):
     if row:
         yield row
     for page in range(2, total + 1):
-        html = sess.postback(FORMVIEW, f"Page${page}", surname)
+        html = sess.postback(FORMVIEW, f"Page${page}", surname,
+                             tag=f"{surname} p{page}/{total}")
         row = parse_details(html)
         if row:
             yield row
@@ -157,27 +182,45 @@ def load_done(checkpoint):
         return set(line.rstrip("\n") for line in f)
 
 
+def fmt_hms(seconds):
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}"
+
+
+def progress_bar(done, total, width=24):
+    filled = int(width * done / total) if total else width
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="gibraltar_1921_census.csv")
     ap.add_argument("--checkpoint", default="done_surnames.txt")
     ap.add_argument("--limit", type=int, default=0, help="only N surnames (test)")
     ap.add_argument("--delay", type=float, default=0.3, help="seconds between requests")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="number of parallel workers (each with its own session)")
+    ap.add_argument("--logfile", default="scrape.log")
     args = ap.parse_args()
 
+    setup_logging(args.logfile)
+
     sess = Session()
-    print("Loading surname list...", flush=True)
+    log.info("Loading surname list...")
     html = sess.load()
     surnames = surnames_from(html)
-    print(f"Found {len(surnames)} surname entries.", flush=True)
+    log.info("Found %d surname entries.", len(surnames))
 
     done = load_done(args.checkpoint)
     if done:
-        print(f"Resuming: {len(done)} surnames already done.", flush=True)
+        log.info("Resuming: %d surnames already done.", len(done))
 
     todo = [s for s in surnames if s not in done]
     if args.limit:
         todo = todo[: args.limit]
+    log.info("To do: %d surnames with %d worker(s).", len(todo), args.workers)
 
     file_exists = os.path.exists(args.out)
     out = open(args.out, "a", newline="", encoding="utf-8")
@@ -185,31 +228,58 @@ def main():
     if not file_exists:
         writer.writeheader()
         out.flush()
-
     ck = open(args.checkpoint, "a", encoding="utf-8")
-    grand_total = 0
-    for n, surname in enumerate(todo, 1):
+
+    io_lock = threading.Lock()          # guards the CSV + checkpoint files
+    progress = {"surnames": 0, "records": 0, "errors": 0}
+
+    def worker(surname):
+        """Scrape one surname with its own session; return (name, rows, error)."""
+        s = Session()
+        s.load()
         try:
-            count = 0
-            for row in scrape_surname(sess, surname):
-                writer.writerow(row)
-                count += 1
-                grand_total += 1
-                time.sleep(args.delay)
-            out.flush()
-            ck.write(surname + "\n")
-            ck.flush()
-            print(f"[{n}/{len(todo)}] {surname!r}: {count} records "
-                  f"(running total {grand_total})", flush=True)
+            rows = list(scrape_surname(s, surname))
+            return surname, rows, None
         except Exception as e:  # noqa: BLE001
-            print(f"[{n}/{len(todo)}] {surname!r}: ERROR {e} - will retry next run",
-                  file=sys.stderr, flush=True)
-            # reset session state on error before moving on
-            sess = Session()
-            sess.load()
+            return surname, None, e
+
+    if args.workers <= 1:
+        results = (worker(s) for s in todo)
+    else:
+        pool = ThreadPoolExecutor(max_workers=args.workers)
+        results = pool.map(worker, todo)
+
+    total = len(todo)
+    start = time.time()
+    for surname, rows, err in results:
+        with io_lock:
+            done_n = progress["surnames"] + progress["errors"] + 1
+            if err is not None:
+                progress["errors"] += 1
+                log.error("%s: FAILED (%s) - will retry next run", surname, err)
+            else:
+                for row in rows:
+                    writer.writerow(row)
+                out.flush()
+                ck.write(surname + "\n")
+                ck.flush()
+                progress["surnames"] += 1
+                progress["records"] += len(rows)
+            elapsed = time.time() - start
+            rate = done_n / elapsed if elapsed else 0
+            eta = (total - done_n) / rate if rate else 0
+            pct = 100.0 * done_n / total
+            log.info("%s %5.1f%% (%d/%d) | %d recs | %d err | %.1f/s | ETA %s | %s +%d",
+                     progress_bar(done_n, total), pct, done_n, total,
+                     progress["records"], progress["errors"], rate,
+                     fmt_hms(eta), surname, len(rows) if rows else 0)
+        if args.delay:
+            time.sleep(args.delay)
+
     out.close()
     ck.close()
-    print(f"Done. Wrote {grand_total} new records to {args.out}", flush=True)
+    log.info("Done. Wrote %d new records (%d surname errors) to %s",
+             progress["records"], progress["errors"], args.out)
 
 
 if __name__ == "__main__":
