@@ -159,20 +159,37 @@ def parse_details(html):
 
 
 def scrape_surname(sess, surname):
-    """Yield one dict per individual for the given surname."""
+    """Return a list with one dict per individual for the given surname.
+
+    Raises if the number of records parsed does not match the total the site
+    reports ("N record(s) Found"), so an incomplete surname is retried rather
+    than silently under-counted.
+    """
     html = sess.postback(DROPDOWN, "", surname, tag=f"{surname} select")
     total = total_records(html)
     if total == 0:
-        return
-    row = parse_details(html)
-    if row:
-        yield row
-    for page in range(2, total + 1):
-        html = sess.postback(FORMVIEW, f"Page${page}", surname,
-                             tag=f"{surname} p{page}/{total}")
+        return []
+    rows = []
+    for page in range(1, total + 1):
+        if page > 1:
+            html = sess.postback(FORMVIEW, f"Page${page}", surname,
+                                 tag=f"{surname} p{page}/{total}")
         row = parse_details(html)
-        if row:
-            yield row
+        # A page must yield a record; retry the postback a few times if not.
+        attempt = 0
+        while row is None and attempt < 3:
+            attempt += 1
+            log.warning("%s p%d/%d: no record parsed - retry %d",
+                        surname, page, total, attempt)
+            html = sess.postback(FORMVIEW, f"Page${page}", surname,
+                                 tag=f"{surname} p{page}/{total} retry{attempt}")
+            row = parse_details(html)
+        if row is not None:
+            rows.append(row)
+    if len(rows) != total:
+        raise RuntimeError(
+            f"{surname}: parsed {len(rows)} of {total} records")
+    return rows
 
 
 def load_done(checkpoint):
