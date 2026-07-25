@@ -49,12 +49,41 @@ The scraper is **resumable**: completed surnames are recorded in
 `done_surnames.txt`, and rows are appended to the CSV as they are collected, so you
 can stop and restart without losing or duplicating work.
 
-### Convert to Excel
+### Build the Excel workbook
 
 ```bash
 pip install openpyxl
-python3 make_excel.py            # gibraltar_1921_census.csv -> .xlsx
+python3 build_workbook.py         # Summary -> Geography -> Raw Data
+# or a plain single-sheet export:
+python3 make_excel.py
 ```
+
+The `.xlsx` has three sheets:
+
+1. **Summary** — headline totals and breakdowns by Ward, Sex, Religion, Marital
+   Status, Education, and top Birthplaces / Occupations.
+2. **Geography** — Ward → Division → Police District → headcount + representative
+   streets.
+3. **Raw Data** — every record exactly as scraped (no added columns).
+
+### Ward / Division / District mapping
+
+The census `Division` corresponds to a **Ward** and `District` to a **Police
+District**, per the *City Council Ordinance 1921, First Schedule (List of
+Wards)*:
+
+| Ward | Census Division | Police Districts |
+|------|-----------------|------------------|
+| Old Town Ward  | 1 | 1, 2, 3, 4, 7, 9, 10, 15 |
+| Castle Ward    | 2 | 5, 6, 8, 11, 12, 13, 14, 18 |
+| Cathedral Ward | 3 | 16, 17, 19, 25, 26, 27 |
+| Europa Ward    | 4 | 20, 21, 22, 23, 24 + the "(South)" series 1–11 |
+| *Military & Government establishments* | 5 | (special enumeration, no district) |
+| *Shipping (afloat)* | 6 | (ships in the Bay, no district) |
+
+District numbers **restart** in Europa Ward (the "(South)" series), so the same
+number appears under more than one Division — always read `Division` + `District`
+together.
 
 ## Notes / etiquette
 
