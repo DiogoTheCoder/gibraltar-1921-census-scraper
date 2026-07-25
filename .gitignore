@@ -1,6 +1,10 @@
-# scraper working files / output
+# scraper working files
 done_surnames.txt
 test_done.txt
 test.csv
+ptest.csv
+ptest_done.txt
+ptest.log
+scrape.log
 *.pyc
 __pycache__/

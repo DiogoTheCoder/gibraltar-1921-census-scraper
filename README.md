@@ -1,10 +1,17 @@
 # 1921 Gibraltar Census Scraper
 
-Scrapes the full **1921 Gibraltar Census** dataset (~18,700 civilian residents
-recorded on 19 June 1921) from the Gibraltar National Archives and exports it to
-CSV / Excel.
+Scrapes the full **1921 Gibraltar Census** dataset from the Gibraltar National
+Archives and exports it to CSV / Excel.
 
 Source: <https://www.nationalarchives.gi/1921.aspx>
+
+## The dataset (included in this repo)
+
+* **`gibraltar_1921_census.csv`** / **`gibraltar_1921_census.xlsx`**
+* **18,390 individuals** across **3,269 surname entries**, recorded on 19 June 1921
+* 22 fields per person (see below)
+* Deduplicated by person `ID`; the `.xlsx` has a frozen header row and column
+  filters ready to use.
 
 ## What it does
 
@@ -40,11 +47,11 @@ The scraper is **resumable**: completed surnames are recorded in
 `done_surnames.txt`, and rows are appended to the CSV as they are collected, so you
 can stop and restart without losing or duplicating work.
 
-### Convert to Excel (optional)
+### Convert to Excel
 
 ```bash
-pip install pandas openpyxl
-python3 -c "import pandas as pd; pd.read_csv('gibraltar_1921_census.csv').to_excel('gibraltar_1921_census.xlsx', index=False)"
+pip install openpyxl
+python3 make_excel.py            # gibraltar_1921_census.csv -> .xlsx
 ```
 
 ## Notes / etiquette
