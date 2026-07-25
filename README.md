@@ -8,10 +8,12 @@ Source: <https://www.nationalarchives.gi/1921.aspx>
 ## The dataset (included in this repo)
 
 * **`gibraltar_1921_census.csv`** / **`gibraltar_1921_census.xlsx`**
-* **18,390 individuals** across **3,269 surname entries**, recorded on 19 June 1921
+* **18,697 individuals** across **3,269 surname entries**, recorded on 19 June 1921
 * 22 fields per person (see below)
-* Deduplicated by person `ID`; the `.xlsx` has a frozen header row and column
-  filters ready to use.
+* Complete and verified: record IDs run contiguously 1–18,697 with **no gaps and
+  no duplicates**, and every surname's row count was checked against the site's
+  own "N record(s) Found". (The archive's preface rounds this to "18,700".)
+* The `.xlsx` has a frozen header row and column filters ready to use.
 
 ## What it does
 
