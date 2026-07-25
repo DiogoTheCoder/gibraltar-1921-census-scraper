@@ -33,6 +33,50 @@ WARD = {
 }
 WARD_ORDER = ["1", "2", "3", "4", "5", "6"]
 
+# --- Franchise estimate (City Council Ordinance 1921, ss. 14-15) -------------
+# Electors = British subject, of full age (21+), an occupier of premises as
+# owner/tenant/lodger; women excluded; Crown servants in rent-free quarters
+# excluded. The census records none of nationality, rates, legal incapacity or
+# tenure directly, so these are proxies (see the notes written onto the sheet).
+ELECTOR_RELATIONS = {"Head", "Head of family", "Lodger"}
+ELECTOR_DIVISIONS = ["1", "2", "3", "4"]  # wards; Div 5 (Crown quarters) & 6 (afloat) excluded
+FULL_AGE = 21
+
+_BRITISH_PLACES = {
+    "GIBRALTAR", "GIBRLATAR", "GIBRALTA", "GIB", "ENGLAND", "ENG", "SCOTLAND",
+    "IRELAND", "WALES", "BRITAIN", "UK", "MALTA", "GOZO", "INDIA", "CYPRUS",
+    "JERSEY", "GUERNSEY", "CANADA", "AUSTRALIA", "JAMAICA", "CEYLON",
+    "SINGAPORE", "ADEN", "HONGKONG",
+}
+_FOREIGN_PLACES = {
+    "SPAIN", "PORTUGAL", "ITALY", "FRANCE", "MOROCCO", "MAROC", "TETUAN",
+    "MARAKESH", "MOGADOR", "JAPAN", "GERMANY", "AUSTRIA", "GREECE", "USA",
+    "AMERICA", "ARGENTINA", "TURKEY", "RUSSIA", "HOLLAND", "BELGIUM", "SWEDEN",
+    "NORWAY", "DENMARK", "SWITZERLAND", "BRAZIL", "CHINA", "EGYPT", "POLAND",
+    "CUBA", "MEXICO", "CHILE", "URUGUAY", "PHILIPPINES",
+}
+
+
+def british_subject(birthplace):
+    """Classify birthplace as 'british' / 'foreign' / 'uncertain'.
+
+    The census annotates foreign-born British subjects with a 'BS' suffix
+    (e.g. 'La Linea SPAIN BS') and non-subjects with 'NBS'.
+    """
+    t = birthplace.strip().upper().split()
+    if not t or t == ["NO", "DATA"]:
+        return "uncertain"
+    if t[-1] == "BS" or ("BRITISH" in t and "SUBJECT" in t):
+        return "british"
+    if "NBS" in t or "(NBS)" in t or ("NOT" in t and "SUBJECT" in t):
+        return "foreign"
+    if any(w in _BRITISH_PLACES for w in t):
+        return "british"
+    if any(w in _FOREIGN_PLACES for w in t):
+        return "foreign"
+    return "uncertain"
+
+
 TITLE_FONT = Font(bold=True, size=14)
 H1_FONT = Font(bold=True, size=12, color="305496")
 HDR_FONT = Font(bold=True, color="FFFFFF")
@@ -131,6 +175,72 @@ def build_summary(ws, rows):
         ws.column_dimensions[col].width = w
 
 
+def build_electors(ws, rows):
+    ws["A1"] = "Estimated Electors per Ward — 1921 Franchise"
+    ws["A1"].font = TITLE_FONT
+    ws["A2"] = ("City Council Ordinance 1921, ss. 14-15. ESTIMATE from census "
+                "fields (proxies) — see notes below.")
+    ws["A2"].font = SUBTLE
+
+    def qualifies(x, relations):
+        return (x["Sex"] == "M"
+                and x["Age"].isdigit() and int(x["Age"]) >= FULL_AGE
+                and x["Division"] in ELECTOR_DIVISIONS
+                and x["RelationToHead"].strip() in relations)
+
+    def ward_table(relations):
+        out = []
+        te = to = tu = 0
+        for dv in ELECTOR_DIVISIONS:
+            sub = [x for x in rows if x["Division"] == dv and qualifies(x, relations)]
+            brit = sum(1 for x in sub if british_subject(x["Birthplace"]) == "british")
+            unc = sum(1 for x in sub if british_subject(x["Birthplace"]) == "uncertain")
+            out.append([WARD[dv], dv, len(sub), brit, unc])
+            te += brit
+            to += len(sub)
+            tu += unc
+        out.append(["TOTAL", "", to, te, tu])
+        return out
+
+    hdr = ["Ward", "Division", "Adult male occupiers",
+           "Estimated electors (British subject)", "Uncertain nationality"]
+    r = add_table(ws, 4, hdr, ward_table(ELECTOR_RELATIONS))
+
+    # sensitivity line
+    ws.cell(row=r, column=1,
+            value="Sensitivity — if 'Boarder' is also treated as a lodger:"
+            ).font = H1_FONT
+    r += 1
+    r = add_table(ws, r, hdr,
+                  ward_table(ELECTOR_RELATIONS | {"Boarder"}))
+
+    notes = [
+        "How this estimate maps the franchise onto census fields:",
+        "  • British subject  -> Birthplace in a British territory, or annotated 'BS' "
+        "(the census marks foreign-born subjects 'BS' and non-subjects 'NBS').",
+        "  • Of full age      -> Age >= 21.",
+        "  • Women excluded    -> Sex = M only (a franchise proviso).",
+        "  • Owner/tenant/lodger -> RelationToHead is Head, Head of family or Lodger "
+        "(household members who are not the occupier do not qualify in their own right).",
+        "  • Crown rent-free quarters excluded -> Divisions 5 (military & government "
+        "establishments) and 6 (afloat) are dropped entirely.",
+        "",
+        "Cannot be tested from the census (assumed satisfied, so this is an UPPER bound):",
+        "  • Not in arrears of rates;  • Not under legal incapacity;  • >= 6 months' occupation.",
+        "'Uncertain nationality' = birthplace missing or unclassifiable; electors likely lie "
+        "between the British-subject figure and that figure plus the uncertain count.",
+    ]
+    r += 1
+    for line in notes:
+        c = ws.cell(row=r, column=1, value=line)
+        if line.endswith(":"):
+            c.font = Font(bold=True)
+        r += 1
+
+    for col, w in {"A": 40, "B": 10, "C": 22, "D": 34, "E": 20}.items():
+        ws.column_dimensions[col].width = w
+
+
 def build_geography(ws, rows):
     ws["A1"] = "Geography — Ward / Division / Police District"
     ws["A1"].font = TITLE_FONT
@@ -189,10 +299,12 @@ def main():
     wb = Workbook()
     build_summary(wb.active, rows)
     wb.active.title = "Summary"
+    build_electors(wb.create_sheet("Electors"), rows)
     build_geography(wb.create_sheet("Geography"), rows)
     build_raw(wb.create_sheet("Raw Data"), rows, fields)
     wb.save(dst)
-    print(f"Wrote {dst}: Summary + Geography + Raw Data ({len(rows)} records)")
+    print(f"Wrote {dst}: Summary + Electors + Geography + Raw Data "
+          f"({len(rows)} records)")
 
 
 if __name__ == "__main__":

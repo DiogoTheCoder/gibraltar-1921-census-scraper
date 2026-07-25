@@ -58,13 +58,26 @@ python3 build_workbook.py         # Summary -> Geography -> Raw Data
 python3 make_excel.py
 ```
 
-The `.xlsx` has three sheets:
+The `.xlsx` has four sheets:
 
 1. **Summary** — headline totals and breakdowns by Ward, Sex, Religion, Marital
    Status, Education, and top Birthplaces / Occupations.
-2. **Geography** — Ward → Division → Police District → headcount + representative
+2. **Electors** — estimated electors per ward under the 1921 franchise (see below).
+3. **Geography** — Ward → Division → Police District → headcount + representative
    streets.
-3. **Raw Data** — every record exactly as scraped (no added columns).
+4. **Raw Data** — every record exactly as scraped (no added columns).
+
+### Elector estimate (City Council Ordinance 1921, ss. 14-15)
+
+The franchise: a British subject of full age, not under legal incapacity and not
+in arrears of rates, who had occupied premises as owner, tenant or lodger for at
+least six months — **women excluded**, and **Crown servants in rent-free quarters
+excluded**. The census records none of nationality, rates, incapacity or tenure
+directly, so the Electors sheet is an **estimate** built from proxies (Sex = M,
+Age ≥ 21, Birthplace/"BS" annotation for British-subject status, RelationToHead ∈
+{Head, Lodger}, Divisions 1-4 only). It comes to roughly **2,950 electors** across
+the four wards (see the sheet for the per-ward figures, a boarder-inclusive
+sensitivity, and full caveats).
 
 ### Ward / Division / District mapping
 
