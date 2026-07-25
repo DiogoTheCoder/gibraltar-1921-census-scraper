@@ -206,6 +206,26 @@ def build_electors(ws, rows):
            "Estimated electors (British subject)", "Uncertain nationality"]
     r = add_table(ws, 4, hdr, ward_table(ELECTOR_RELATIONS))
 
+    # per police district within each ward
+    ws.cell(row=r, column=1,
+            value="By police district (within ward)").font = H1_FONT
+    r += 1
+    dhdr = ["Ward", "Division", "District", "Adult male occupiers",
+            "Estimated electors (British subject)", "Uncertain nationality"]
+    drows = []
+    for dv in ELECTOR_DIVISIONS:
+        dists = sorted({x["District"] for x in rows if x["Division"] == dv},
+                       key=lambda d: (not d.isdigit(), int(d) if d.isdigit() else 0))
+        for dist in dists:
+            sub = [x for x in rows if x["Division"] == dv and x["District"] == dist
+                   and qualifies(x, ELECTOR_RELATIONS)]
+            if not sub:
+                continue
+            brit = sum(1 for x in sub if british_subject(x["Birthplace"]) == "british")
+            unc = sum(1 for x in sub if british_subject(x["Birthplace"]) == "uncertain")
+            drows.append([WARD[dv], dv, dist, len(sub), brit, unc])
+    r = add_table(ws, r, dhdr, drows)
+
     # sensitivity line
     ws.cell(row=r, column=1,
             value="Sensitivity — if 'Boarder' is also treated as a lodger:"
@@ -237,7 +257,8 @@ def build_electors(ws, rows):
             c.font = Font(bold=True)
         r += 1
 
-    for col, w in {"A": 40, "B": 10, "C": 22, "D": 34, "E": 20}.items():
+    for col, w in {"A": 40, "B": 10, "C": 10, "D": 22,
+                   "E": 34, "F": 22}.items():
         ws.column_dimensions[col].width = w
 
 

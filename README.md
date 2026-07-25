@@ -62,7 +62,7 @@ The `.xlsx` has four sheets:
 
 1. **Summary** — headline totals and breakdowns by Ward, Sex, Religion, Marital
    Status, Education, and top Birthplaces / Occupations.
-2. **Electors** — estimated electors per ward under the 1921 franchise (see below).
+2. **Electors** — estimated electors per ward AND per police district under the 1921 franchise (see below).
 3. **Geography** — Ward → Division → Police District → headcount + representative
    streets.
 4. **Raw Data** — every record exactly as scraped (no added columns).
